@@ -1,26 +1,31 @@
 # Ticketing API
 
-A simple REST API for creating and managing support tickets using Node.js and Express.
+A simple RESTful Ticketing API built using Node.js and Express.js.
+
+This API allows users to create tickets, view all tickets, and retrieve a specific ticket by its ID.
 
 ## Features
 
-- Create a ticket
+- Create a new ticket
 - Get all tickets
 - Get a ticket by ID
 - Validate ticket data
 - Return appropriate HTTP status codes
-- In-memory ticket storage
+- Simple in-memory ticket storage
 
-## Technologies
+## Technologies Used
 
 - Node.js
 - Express.js
 - JavaScript
 - REST API
 
-## Installation
+## Project Structure
 
-Clone the repository:
-
-```bash
-git clone https://github.com/balajikarthik0911/ticketing-api.git
+```text
+ticketing-api/
+├── server.js
+├── package.json
+├── package-lock.json
+├── .gitignore
+└── README.md
