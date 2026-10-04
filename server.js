@@ -1,31 +1,50 @@
 const express = require("express");
+const { MongoClient, ObjectId } = require("mongodb");
+const cors = require("cors");
 
 const app = express();
-app.use(express.json());
-app.get("/", (req, res) => {
-  res.json({
-    message: "Ticketing API is running!"
-  });
-});
 
-let tickets = [];
-let nextId = 1;
+app.use(cors());
+app.use(express.json());
+
+const PORT = process.env.PORT || 3000;
+const MONGODB_URI = process.env.MONGODB_URI;
+
+if (!MONGODB_URI) {
+  console.error("MONGODB_URI is not set");
+  process.exit(1);
+}
+
+const client = new MongoClient(MONGODB_URI);
+
+let ticketsCollection;
 
 // Allowed values
 const priorities = ["LOW", "MEDIUM", "HIGH"];
 const statuses = ["OPEN", "IN_PROGRESS", "CLOSED"];
 const categories = ["TECHNICAL", "BILLING", "GENERAL"];
 
+// Home / health check
+app.get("/", (req, res) => {
+  res.json({
+    message: "Ticketing API is running!"
+  });
+});
+
 // Validation
 function validateTicket(req, res, next) {
   const { title, description, priority, status, category } = req.body;
 
   if (!title || typeof title !== "string") {
-    return res.status(400).json({ error: "Title is required" });
+    return res.status(400).json({
+      error: "Title is required"
+    });
   }
 
   if (!description || typeof description !== "string") {
-    return res.status(400).json({ error: "Description is required" });
+    return res.status(400).json({
+      error: "Description is required"
+    });
   }
 
   if (!priorities.includes(priority)) {
@@ -49,83 +68,155 @@ function validateTicket(req, res, next) {
   next();
 }
 
-// POST /api/tickets
-app.post("/api/tickets", validateTicket, (req, res) => {
-  const ticket = {
-    id: nextId++,
-    title: req.body.title,
-    description: req.body.description,
-    priority: req.body.priority,
-    status: req.body.status,
-    category: req.body.category
-  };
+// CREATE ticket
+app.post("/api/tickets", validateTicket, async (req, res) => {
+  try {
+    const ticket = {
+      title: req.body.title,
+      description: req.body.description,
+      priority: req.body.priority,
+      status: req.body.status,
+      category: req.body.category,
+      createdAt: new Date()
+    };
 
-  tickets.push(ticket);
+    const result = await ticketsCollection.insertOne(ticket);
 
-  res.status(201).json(ticket);
-});
-
-// GET /api/tickets
-app.get("/api/tickets", (req, res) => {
-  res.status(200).json(tickets);
-});
-
-// GET /api/tickets/:id
-app.get("/api/tickets/:id", (req, res) => {
-  const id = Number(req.params.id);
-
-  const ticket = tickets.find(t => t.id === id);
-
-  if (!ticket) {
-    return res.status(404).json({
-      error: "Ticket not found"
+    res.status(201).json({
+      id: result.insertedId,
+      ...ticket
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      error: "Failed to create ticket"
     });
   }
-
-  res.status(200).json(ticket);
 });
 
-// PUT /api/tickets/:id
-app.put("/api/tickets/:id", validateTicket, (req, res) => {
-  const id = Number(req.params.id);
+// GET all tickets
+app.get("/api/tickets", async (req, res) => {
+  try {
+    const tickets = await ticketsCollection
+      .find()
+      .sort({ createdAt: -1 })
+      .toArray();
 
-  const ticket = tickets.find(t => t.id === id);
-
-  if (!ticket) {
-    return res.status(404).json({
-      error: "Ticket not found"
+    res.status(200).json(
+      tickets.map(ticket => ({
+        ...ticket,
+        id: ticket._id
+      }))
+    );
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      error: "Failed to fetch tickets"
     });
   }
-
-  ticket.title = req.body.title;
-  ticket.description = req.body.description;
-  ticket.priority = req.body.priority;
-  ticket.status = req.body.status;
-  ticket.category = req.body.category;
-
-  res.status(200).json(ticket);
 });
 
-// DELETE /api/tickets/:id
-app.delete("/api/tickets/:id", (req, res) => {
-  const id = Number(req.params.id);
+// GET one ticket
+app.get("/api/tickets/:id", async (req, res) => {
+  try {
+    const ticket = await ticketsCollection.findOne({
+      _id: new ObjectId(req.params.id)
+    });
 
-  const index = tickets.findIndex(t => t.id === id);
+    if (!ticket) {
+      return res.status(404).json({
+        error: "Ticket not found"
+      });
+    }
 
-  if (index === -1) {
-    return res.status(404).json({
-      error: "Ticket not found"
+    res.status(200).json({
+      ...ticket,
+      id: ticket._id
+    });
+  } catch (error) {
+    res.status(400).json({
+      error: "Invalid ticket ID"
     });
   }
-
-  tickets.splice(index, 1);
-
-  res.status(204).send();
 });
 
-// Start server
-const PORT = 3000;
+// UPDATE ticket
+app.put("/api/tickets/:id", validateTicket, async (req, res) => {
+  try {
+    const updateData = {
+      title: req.body.title,
+      description: req.body.description,
+      priority: req.body.priority,
+      status: req.body.status,
+      category: req.body.category,
+      updatedAt: new Date()
+    };
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+    const result = await ticketsCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: updateData }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        error: "Ticket not found"
+      });
+    }
+
+    const updatedTicket = await ticketsCollection.findOne({
+      _id: new ObjectId(req.params.id)
+    });
+
+    res.status(200).json({
+      ...updatedTicket,
+      id: updatedTicket._id
+    });
+  } catch (error) {
+    res.status(400).json({
+      error: "Invalid ticket ID"
+    });
+  }
 });
+
+// DELETE ticket
+app.delete("/api/tickets/:id", async (req, res) => {
+  try {
+    const result = await ticketsCollection.deleteOne({
+      _id: new ObjectId(req.params.id)
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({
+        error: "Ticket not found"
+      });
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    res.status(400).json({
+      error: "Invalid ticket ID"
+    });
+  }
+});
+
+// Connect MongoDB and start server
+async function startServer() {
+  try {
+    await client.connect();
+
+    const database = client.db("ticketing");
+
+    ticketsCollection = database.collection("tickets");
+
+    console.log("Connected to MongoDB Atlas");
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error("MongoDB connection failed:", error);
+    process.exit(1);
+  }
+}
+
+startServer();
